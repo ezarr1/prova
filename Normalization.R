@@ -234,6 +234,37 @@ print_lists <- function(lists,num){
 
 print_lists(x,num)
 
+#create the tables from the results obtained with the dependencies check:
+table_columns <- list()
+for( j in 1:length(x)){
+  uneven_indices <- seq(from = 1, to = length(x[[j]]), by = 2)
+  for (i in uneven_indices){
+    new_column <- Loans_table[[x[[j]][[i]]]]
+    names(new_column) <- x[[j]][[i]] 
+    table_columns[[x[[j]][[i]]]] <- new_column
+  }
+}
+table <- as.data.frame(table_columns)
+
+Dependent_table <- cbind(Loans_table$NDG, table) %>% rename( NDG = "Loans_table$NDG")
+
+#modify column names:
+Dependent_table <- Dependent_table %>% rename('%_Consortium_Guarantee' ="X._Consortium_Guarantee")
+
+for (col_name in colnames(Dependent_table)) {
+  if (grepl("\\.*\\.", col_name)) {
+      new_col_name <- gsub(".", "(", col_name, fixed = TRUE)
+      new_col_name_1 <- paste0(substring(new_col_name, 1, nchar(col_name) - 1), ")")
+      colnames(Dependent_table)[colnames(Dependent_table) == col_name] <- new_col_name_1
+  }
+}
+
+
+# create new table from the remaining ones:
+Independent_table <- Loans_table
+for(col in names(Dependent_table)){
+    Independent_table <- Independent_table %>% select(-col)
+}
 
 
 
