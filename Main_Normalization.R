@@ -14,8 +14,14 @@ library(rlang)
 conflict_prefer('select','dplyr','MASS')
 conflict_prefer('filter','dplyr','MASS')
 
+# load the function created in file: Functions.R:
+source('Functions.R')
+source('Matrix_function_dependencies.R')
+
 #Load NDG table:
 NDG_table <- read_excel("DATATAPE INVESTITORE  BCC ANNIA CUTOFF 25102022.xlsx", sheet = "NDG")
+
+#Basic modifications for column names and NAs removal:
 NDG_table <- NDG_table %>% rename(Region=`Borrower's Region`, Tax_ID = 'Tax ID', Name = 'BorrowerName')
 NDG_table$Group <- NDG_table$Group %>% gsub('-',NA,.)
 
@@ -29,15 +35,18 @@ Borrowers_table <-  separated_table %>%
                names_to = c(".value", "taxID"),
                names_pattern = "(BorrowerName|TaxID)(.*)",values_drop_na =  TRUE)
 
+#After "pivoting", we need to reshape the data:
 Borrowers_table$TaxID <- Borrowers_table$TaxID %>% str_trim(.,'left')
 Borrowers_table$BorrowerName <- Borrowers_table$BorrowerName %>% str_trim(.,'left')
 Borrowers_table <- Borrowers_table %>% 
   select(- taxID)  %>%
   rename(Name = BorrowerName, Tax_ID = TaxID)
+
+#Create the primary key:
 Borrowers_table <- Borrowers_table %>% mutate(Borrower_ID = sprintf('%03d',199 + row_number()) )
 
 
-#create Address_table_final:
+#Table with address information (Address_table_final) with its primary key:
 Address_table <- NDG_table %>% select(Address, Town, City, Region)
 Address_table <- Address_table %>%  mutate(Address_ID = sprintf('%03d',399 + row_number()) )
 Address_table_final <- Address_table %>% select(Address_ID,Address, Town, City, Region )
@@ -49,7 +58,7 @@ Borrowers_table_1 <- left_join(Borrowers_table,Address_table_final, by = ('Addre
   select(-Address,-City,-Town,-Region)
 
 
-#Final version of the Borrowers_table and NDG_table:
+#Final version of the Borrowers_table and NDG_table ordering the columns:
 Borrowers_table_final <- Borrowers_table_1 %>% select(-Category) %>% 
   relocate(Group, .after = Address_ID) %>% 
   relocate(Borrower_ID, .before = NDG) %>% 
@@ -58,6 +67,7 @@ Borrowers_table_final <- Borrowers_table_1 %>% select(-Category) %>%
 NDG_table_final <- Borrowers_table_1 %>% select(NDG,Category) %>% distinct()
 
 
+#Apply the detect primary key function to the Borrower table:
 
 possible_keys <- detect_primary_keys(Borrowers_table)
 print(possible_keys)
@@ -74,19 +84,18 @@ Loans <- read_excel("DATATAPE INVESTITORE  BCC ANNIA CUTOFF 25102022.xlsx", shee
 Loans_table <- Loans[-1, ] %>% row_to_names(1)
 
 
-# modify all the column names
+#Modify all the column names:
 names(Loans_table) <- gsub('[.,/, ]', '_', names(Loans_table))
 colnames(Loans_table) <- sapply(colnames(Loans_table), capitalize_after_underscore)
-names(Loans_table)
 Loans_table <- Loans_table %>% rename(NDG = 'Ndg',Loans_ID = 'Id_Loans',
                                       Borrower_Name = 'Borrowername', Secured_Unsecured_NDG = 'Sec__Unsec_X_Ndg')
 names(Loans_table) <- names(Loans_table) %>% gsub('Gbv','GBV',.)
 colnames(Loans_table) <- sub("(_\\()?_Yes_No(\\))?", "", colnames(Loans_table))
-colnames(Loans_table) <- sub("(_\\()yes_No(\\))?", "", colnames(Loans_table))
+colnames(Loans_table) <- sub("(_\\()yes_No(\\))?", "", colnames(Loans_table)) 
 colnames(Loans_table) <- gsub("_+", "_", colnames(Loans_table))
 
 
-#the dates are excel numbers, recuperate the real date and create the UTP column: 
+#the dates are excel numbers, recuperate the real dates and create the UTP column: 
 Loans_table$Database_Date <- excel_numeric_to_date(as.numeric(Loans_table$Database_Date))
 UTP <- Loans_table$Default_Date %>% as.character()
 Loans_table$Default_Date <- excel_numeric_to_date(as.numeric(Loans_table$Default_Date))
@@ -104,36 +113,23 @@ print(possible_keys_90)
 possible_keys_NAs_perc <- detect_primary_keys_NAs_perc(Loans_table,number_NAs=1,percentage=0.4)
 print(possible_keys_NAs_perc)
 
-# apply the function to the Loans_table:
+
+#Apply the 'check' function to the Loans_table to find the functional dependencies:
 
 column_to_eliminate <- 'Loans_ID'
 key <- 'NDG'
 num <- 0.8
 columns_to_check <- Loans_table %>% select(-key,-column_to_eliminate) %>% names()
 
-x <- check(Loans_table,columns_to_check, num, key,FALSE)
+check_result <- check(Loans_table,columns_to_check, num, key,FALSE)
+
+print_lists(check_result,num)
 
 
-
-#the check function return a list of two lists, create a function to print them formatted:
-print_lists <- function(lists,num){
-  for(j in 1:length(lists)){
-    for (col in names(lists[[j]])){
-      value <- as.numeric(lists[[j]][[col]])
-      formatted_ratio <- paste0(format(round(value, 2), nsmall = 2), "%")
-      cat("Column Name: ", col, "  Ratio: ", formatted_ratio, "\n")
-    }
-    cat("\n")
-  }
-}
-
-print_lists(x,num)
-
-
-#create the tables from the results obtained with the dependencies check:
+#create the table from the results obtained with the dependencies check:
 table_columns <- list()
-for( j in 1:length(x)){
-  for (col in names(x[[j]])){
+for( j in 1:length(check_result)){
+  for (col in names(check_result[[j]])){
     new_column <- Loans_table[[col]]
     names(new_column) <- col 
     table_columns[[col]] <- new_column
@@ -141,9 +137,10 @@ for( j in 1:length(x)){
 }
 table <- as.data.frame(table_columns)
 
+#Add the NDG column to the table:
 Dependent_table <- cbind(Loans_table$NDG, table) %>% rename( NDG = "Loans_table$NDG")
 
-#modify column names:
+#rewrite the column names that in the creation of the table were modified:
 Dependent_table <- Dependent_table %>% rename('%_Consortium_Guarantee' ="X._Consortium_Guarantee")
 
 for (col_name in colnames(Dependent_table)) {
@@ -154,8 +151,9 @@ for (col_name in colnames(Dependent_table)) {
   }
 }
 
+#Replace the '-' values with NAs:
 Dependent_table <- Dependent_table %>%  mutate_at(vars(-Default_Date, -Database_Date), ~gsub("-", NA, .))
-
+#remove unused column:
 Dependent_table <- Dependent_table %>% select(-GBV_Expenses)
 
 
@@ -165,6 +163,36 @@ Independent_table <- Loans_table
 for(col in names(Dependent_table)){
   Independent_table <- Independent_table %>% select(-col)
 }
+#Add the NDG column and inserting NAs:
 Independent_table <- Independent_table %>% mutate(NDG = Dependent_table$NDG) %>% relocate(NDG, .after = Loans_ID ) %>%
   mutate(across(everything(), ~gsub("-", NA, .)))
+
+
+
+
+
+
+
+############################################################################
+# proviamo la funzione matrice:
+
+mat <- find_dependencies_matrix_2(Dependent_table)
+rounded_matrix <- round(mat, 2)
+
+prova_borr_na <- Borrowers_table_final %>%  mutate(across(everything(), ~ifelse(is.na(.), "-", .)))
+mat_borr <- find_dependencies_matrix_2(prova_borr_na)
+matrix_borr <- round(mat_borr,2)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
