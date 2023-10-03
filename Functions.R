@@ -13,6 +13,8 @@ library(rlang)
 
 conflict_prefer('select','dplyr','MASS')
 conflict_prefer('filter','dplyr','MASS')
+conflict_prefer('filter','dplyr','stats')
+conflicts_prefer(dplyr::filter)
 
 # KEYS:
 
@@ -29,21 +31,7 @@ detect_primary_keys <- function(table) {
 }
 
 
-#similar function to the previous one but if a column has 0-1 NA and/or >=90% uniqueness it is a possible key:
-detect_primary_keys_90 <- function(table) {
-  possible_keys_90 <- c()
-  for (col in names(table)) {
-    if (!any(is.na(table[[col]])) | sum(is.na(table[[col]]))==1) {
-      if(length(unique(table[[col]]))/nrow(table) >= 0.9){
-        possible_keys_90 <- c(possible_keys_90, col)
-      }
-    }
-  }
-  return(possible_keys_90)
-}
-
-
-#here we modify the function giving the number of NAs and of percentage as parameters:
+#here we modify the function giving the number of NAs and percentage of uniqueness(num in 0:1) as parameters:
 detect_primary_keys_NAs_perc <- function(table,number_NAs,percentage) {
   possible_keys_NAs_perc <- c()
   for (col in names(table)) {
@@ -79,56 +67,51 @@ capitalize_after_underscore <- function(x) {
 
 # DEPENDENCIES:
 
-#check the functional dependencies of the columns(columns_to_check) against one (key) by grouping the data and counting the unique values
-# and it saves the results in two lists: list_100 with 100% uniqueness and list_num with num% uniqueness:
-check_dependencies<- function(table, columns_to_check, num, key) {
-  lista_100 <- list()
+#check the functional dependencies of the columns against one (key) by grouping the data and counting the unique values:
+check_dependencies<- function(table, key) {
   lista_num <- list()
-  for (col in columns_to_check) {
+  for (col in names(table)) {
     grouped_data <- split(table[[col]], table[[key]], drop = TRUE) 
     dependency_check <- sapply(grouped_data, function(group) length(unique(group)))
     
-    if (sum(dependency_check)== length(dependency_check)) {
-      lista_100[[col]] <- 1
+    if (all(dependency_check ==1 )) {
+      lista_num[[col]] <- 1
     } else {
       lista_num[[col]] <- length(dependency_check) / sum(dependency_check)
     }
   }
   
-  result <- list(lista_100, lista_num)
+  result <- lista_num
   return(result)
 }
-
-
-
 
 
 #this function works as the one before but before grouping and counting the unique values it deletes the NAs:
-check_dependencies_NA <- function(table, columns_to_check, num, key) {
-  lista_100_NA <- list()
-  lista_num_NA <- list()
-  for (col in columns_to_check) {
-    tabella_prova <- table[!is.na(table[[col]]), ]
-    grouped_data <- split(tabella_prova[[col]], tabella_prova[[key]], drop = TRUE) 
-    dependency_check <- sapply(grouped_data, function(group) length(unique(group)))
-    
-    if (all(dependency_check == TRUE)) {
-      lista_100_NA[[col]] <- 1
-    } else {
-      lista_num_NA[[col]] <- length(dependency_check) / sum(dependency_check) 
-    }
-  }
-  
-  result <- list(lista_100_NA, lista_num_NA)
-  return(result)
-}
+ check_dependencies_NA<- function(table, key) {
+   lista_num <- list()
+   for (col in names(table)) {
+     tabella_prova <- table[!is.na(table[[col]]), ]
+     grouped_data <- split(tabella_prova[[col]], tabella_prova[[key]], drop = TRUE) 
+     dependency_check <- sapply(grouped_data, function(group) length(unique(group)))
+     
+     if (all(dependency_check ==1 )) {
+       lista_num[[col]] <- 1
+     } else {
+       lista_num[[col]] <- length(dependency_check) / sum(dependency_check)
+     }
+   }
+   
+   result <- lista_num
+   return(result)
+ }
+ 
 
 #unifying the two functions in one using the variable 'con_o_senza'(TRUE or FALSE) to decide which function to use:
-check <- function(table, columns_to_check, num, key,con_o_senza_na){
+check <- function(table, key,con_o_senza_na){
   if(con_o_senza_na){
-    return(check_dependencies(table, columns_to_check, num, key))
+    return(check_dependencies(table, key))
   } else {
-    return(check_dependencies_NA(table, columns_to_check, num, key))
+    return(check_dependencies_NA(table, key))
   }
 }
 
@@ -137,13 +120,12 @@ check <- function(table, columns_to_check, num, key,con_o_senza_na){
 # PRINTING:
 
 #the check function return a list of two lists, this function print them in a readable way:
-print_lists <- function(lists,num){
-  for(j in 1:length(lists)){
-    for (col in names(lists[[j]])){
-      value <- as.numeric(lists[[j]][[col]])*100
+print_list <- function(list){
+  for (col in names(list)){
+      value <- as.numeric(list[[col]])*100
       formatted_ratio <- paste0(format(round(value, 2), nsmall = 2), "%")
       cat("Column Name: ", col, "  Ratio: ", formatted_ratio, "\n")
     }
     cat("\n")
   }
-}
+
