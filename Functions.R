@@ -129,3 +129,22 @@ print_list <- function(list){
     cat("\n")
   }
 
+
+
+#function that check the dependencies of all column vs all column and saves the results in a matrix:
+#using the check_dependencies function defined above:
+                                
+find_dependencies_matrix <- function(table) {
+  num_cols <- ncol(table)
+  dependency_matrix <- matrix(NA, nrow = num_cols, ncol = num_cols)
+  colnames(dependency_matrix) <- colnames(table)
+  rownames(dependency_matrix) <- colnames(table)
+  
+  for (col_2 in colnames(dependency_matrix)) {
+    new_column <- check_dependencies(table, col_2) 
+    new_column <- unlist(new_column)
+    dependency_matrix[,col_2] <- new_column
+  }
+  return(dependency_matrix)
+}
+
