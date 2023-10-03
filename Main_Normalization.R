@@ -180,17 +180,6 @@ Loans_ID_Dependent <- Loans_ID_Dependent %>% mutate(NDG = NDG_Dependent$NDG) %>%
 Loans_ID_Dependent$Asset_Link <- Loans_ID_Dependent$Asset_Link %>% gsub("-", NA, .)
 
 
-
-#############################################################################################
-mat <- find_dependencies_matrix(NDG_Dependent)
-rounded_matrix <- round(mat, 2)
-
-mat2 <- find_dependencies_matrix(Loans_ID_Dependent)
-rounded_matrix2 <- round(mat2, 2)
-#############################################################################################
-
-
-
 # work on NDG_Dependent:
 
 NDG_Dependent <- NDG_Dependent %>% distinct()
