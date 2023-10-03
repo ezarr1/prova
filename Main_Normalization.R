@@ -13,6 +13,8 @@ library(rlang)
 
 conflict_prefer('select','dplyr','MASS')
 conflict_prefer('filter','dplyr','MASS')
+conflict_prefer('filter','dplyr','stats')
+conflicts_prefer(dplyr::filter)
 
 # load the function created in file: Functions.R:
 source('Functions.R')
@@ -72,9 +74,6 @@ NDG_table_final <- Borrowers_table_1 %>% select(NDG,Category) %>% distinct()
 possible_keys <- detect_primary_keys(Borrowers_table)
 print(possible_keys)
 
-possible_keys_90 <- detect_primary_keys_90(Borrowers_table_final)
-print(possible_keys_90)
-
 possible_keys_NAs_perc <- detect_primary_keys_NAs_perc(Borrowers_table_final,number_NAs=1,percentage=0.9)
 print(possible_keys_NAs_perc)
 
@@ -107,92 +106,199 @@ Loans_table$UTP <- if_else(Loans_table$UTP =='UTP','UTP','Bad')
 possible_keys_loans <- detect_primary_keys(Loans_table)
 print(possible_keys_loans)
 
-possible_keys_90 <- detect_primary_keys_90(Loans_table)
-print(possible_keys_90)
-
 possible_keys_NAs_perc <- detect_primary_keys_NAs_perc(Loans_table,number_NAs=1,percentage=0.4)
 print(possible_keys_NAs_perc)
 
 
 #Apply the 'check' function to the Loans_table to find the functional dependencies:
 
-column_to_eliminate <- 'Loans_ID'
 key <- 'NDG'
-num <- 0.8
-columns_to_check <- Loans_table %>% select(-key,-column_to_eliminate) %>% names()
 
-check_result <- check(Loans_table,columns_to_check, num, key,FALSE)
+check_result <- check(Loans_table,key,FALSE)
+length(check_result)
 
-print_lists(check_result,num)
+print_list(check_result)
 
 
-#create the table from the results obtained with the dependencies check:
-table_columns <- list()
-for( j in 1:length(check_result)){
-  for (col in names(check_result[[j]])){
-    new_column <- Loans_table[[col]]
-    names(new_column) <- col 
-    table_columns[[col]] <- new_column
+
+#Apply the matrix function to the original Loans table:
+
+Borrower_na <- Borrowers_table_final %>%  mutate(across(everything(), ~ifelse(is.na(.), "-", .)))
+Borrower_matrix <- find_dependencies_matrix(Borrower_na)
+Borrower_matrix_rounded <- round(Borrower_matrix,2)
+
+
+Loans_matrix <- find_dependencies_matrix(Loans_table)
+Loans_matrix_rounded <- round(Loans_matrix, 2)
+
+
+# add a row with the sum of 1 (dependencies) for each column and order the matrix for better visualization:
+
+Loans_matrix_rounded  <- Loans_matrix_rounded %>% as.data.frame()
+column_sums_ones <- sapply(Loans_matrix_rounded, function(col) sum(col == 1))
+
+Loans_matrix_rounded <- rbind(Loans_matrix_rounded, column_sums_ones) 
+rownames(Loans_matrix_rounded)[40] <- 'Sum_ones'
+Loans_matrix_rounded <- Loans_matrix_rounded[c(40, 1:39), ]
+
+Loans_matrix_ordered <- as.matrix(Loans_matrix_rounded)
+col_index <- order(Loans_matrix_ordered[1,],  decreasing = TRUE)
+Loans_matrix_ordered <- Loans_matrix_ordered[,col_index]
+
+
+
+#create the table from the results obtained with matrix function:
+# we create two tables, one NDG dependent and the other Loans_ID dependent:
+
+# NDG dependent:
+#create a empty dataframe with the same number of rows as LoansTable:
+num_rows <- nrow(Loans_table)  
+NDG_Dependent <- data.frame(matrix(NA, nrow = num_rows, ncol = 0))
+i <- 1
+data <- Loans_matrix_rounded[c(2:40),]      #eliminate first column (sums)
+for (j in 1:length(data$NDG)) {
+  if (data$NDG[j] == 1) {
+    new_column <- Loans_table[, j]
+    col_name <- colnames(Loans_table)[j]
+    NDG_Dependent[, col_name] <- new_column
+    i <- i + 1
   }
 }
-table <- as.data.frame(table_columns)
 
-#Add the NDG column to the table:
-Dependent_table <- cbind(Loans_table$NDG, table) %>% rename( NDG = "Loans_table$NDG")
-
-#rewrite the column names that in the creation of the table were modified:
-Dependent_table <- Dependent_table %>% rename('%_Consortium_Guarantee' ="X._Consortium_Guarantee")
-
-for (col_name in colnames(Dependent_table)) {
-  if (grepl("\\.*\\.", col_name)) {
-    new_col_name <- gsub(".", "(", col_name, fixed = TRUE)
-    new_col_name_1 <- paste0(substring(new_col_name, 1, nchar(col_name) - 1), ")")
-    colnames(Dependent_table)[colnames(Dependent_table) == col_name] <- new_col_name_1
-  }
-}
-
-#Replace the '-' values with NAs:
-Dependent_table <- Dependent_table %>%  mutate_at(vars(-Default_Date, -Database_Date), ~gsub("-", NA, .))
-#remove unused column:
-Dependent_table <- Dependent_table %>% select(-GBV_Expenses)
-
+#rearrange the data:
+NDG_Dependent <- NDG_Dependent %>% relocate(NDG, .before = UTP)
 
 
 # create new table from the remaining ones:
-Independent_table <- Loans_table
-for(col in names(Dependent_table)){
-  Independent_table <- Independent_table %>% select(-col)
+# Loans_ID dependent:
+Loans_ID_Dependent <- Loans_table
+for(col in names(NDG_Dependent)){
+  Loans_ID_Dependent <- Loans_ID_Dependent %>% select(-col)
 }
 #Add the NDG column and inserting NAs:
-Independent_table <- Independent_table %>% mutate(NDG = Dependent_table$NDG) %>% relocate(NDG, .after = Loans_ID ) %>%
-  mutate(across(everything(), ~gsub("-", NA, .)))
+Loans_ID_Dependent <- Loans_ID_Dependent %>% mutate(NDG = NDG_Dependent$NDG) %>% relocate(NDG, .after = Loans_ID )
+Loans_ID_Dependent$Asset_Link <- Loans_ID_Dependent$Asset_Link %>% gsub("-", NA, .)
 
 
 
-
-
-
-
-############################################################################
-# proviamo la funzione matrice:
-
-mat <- find_dependencies_matrix_2(Dependent_table)
+#############################################################################################
+mat <- find_dependencies_matrix(NDG_Dependent)
 rounded_matrix <- round(mat, 2)
 
-prova_borr_na <- Borrowers_table_final %>%  mutate(across(everything(), ~ifelse(is.na(.), "-", .)))
-mat_borr <- find_dependencies_matrix_2(prova_borr_na)
-matrix_borr <- round(mat_borr,2)
+mat2 <- find_dependencies_matrix(Loans_ID_Dependent)
+rounded_matrix2 <- round(mat2, 2)
+#############################################################################################
 
 
 
+# work on NDG_Dependent:
+
+NDG_Dependent <- NDG_Dependent %>% distinct()
+
+# eliminate empty columns:
+NDG_Dependent <- NDG_Dependent[,-c(7,9,10,17,18,20)]
+NDG_Dependent <- NDG_Dependent %>% select(-Group, -Borrower_Name)
+NDG_Dependent$Judicial_Procedures <- NDG_Dependent$Judicial_Procedures %>% gsub('/',',',.)
+NDG_Dependent$Judicial_Procedures_Code <- NDG_Dependent$Judicial_Procedures_Code %>% gsub('[+]',',',.)
+
+#pivot table NDG_Dependent:
+NDG_Dependent <- NDG_Dependent %>% mutate(Judicial_Procedures = strsplit(as.character(Judicial_Procedures),",")) %>% unnest(Judicial_Procedures)
+NDG_Dependent <- NDG_Dependent %>% mutate(Judicial_Procedures_Code = strsplit(as.character(Judicial_Procedures_Code),",")) %>% unnest(Judicial_Procedures_Code)
+
+NDG_Dependent$Judicial_Procedures <- NDG_Dependent$Judicial_Procedures %>% str_trim(.,'left')
+NDG_Dependent$Judicial_Procedures_Code <- NDG_Dependent$Judicial_Procedures_Code %>% str_trim(.,'left')
 
 
 
+# create a Judicial table:
+
+Judicial_table <- NDG_Dependent %>% select(NDG, Judicial_Procedures,Judicial_Procedures_Code)
+Judicial_table <- Judicial_table %>% mutate(Link_ID = paste0('JP', 500 + row_number())) %>% 
+          relocate(Link_ID, .before = NDG) %>% relocate(NDG, .after = Judicial_Procedures_Code)
 
 
 
+# create NDG_Dependent_final:
+# NDG_table_final Category = NDG_Dependent_final UTP
+# so we can delete the NDG_table_final
+
+NDG_Dependent_final <- NDG_Dependent %>% select(-Judicial_Procedures,-Judicial_Procedures_Code) %>% distinct()
 
 
 
+# work on Loans_ID_Dependent table:
+#Link_Consortium <- Loans_ID_Dependent[,c(1,16)] 
+Consortium_table <- Loans_ID_Dependent[,c(1,16:20)] %>% filter(Consortium_Guarantee == 'YES')
+Consortium_table <- Consortium_table %>% mutate(Consortium_ID = paste0('C', 300 + row_number()))
+Consortium_table <- Consortium_table[,c(7,3:6,1)] 
+
+Loans_ID_Dependent <- Loans_ID_Dependent[,-c(16:20)]
+Loans_ID_Dependent <- left_join(Loans_ID_Dependent,Consortium_table, by = ('Loans_ID'='Loans_ID'), copy=FALSE) 
+Loans_ID_Dependent <- Loans_ID_Dependent[,-c(17:20)]
+
+Consortium_table <- Consortium_table[,-6]
+# create Guarantors table:
+
+Guarantors_table <- Loans_ID_Dependent %>% select(1,9,10,11,12,13)
+Guarantors_table$Type_Of_Guarantee <- Guarantors_table$Type_Of_Guarantee %>% gsub('J','I',.)
+
+
+
+# Groups of Guarantors:
+Guarantors_groups <- Loans_ID_Dependent %>% select(12,13) %>% distinct() %>% na.omit()
+Guarantors_groups <- Guarantors_groups %>% mutate(Group_ID = paste0('G', row_number()) )
+
+Guarantors_table <- left_join(Guarantors_table,Guarantors_groups, by = ("Guarantors_Name" = "Guarantors_Name"), copy=FALSE)
+Guarantors_table <- Guarantors_table[,-c(5,6,7)]
+
+Guarantors_table <- Guarantors_table %>% na.omit(.)
+Guarantors_table <- Guarantors_table %>% mutate(Loans_Group_ID = paste0("LG-", 550 + row_number()))
+
+#pivot table Guarantors group:
+
+separated_table_g <- Guarantors_groups %>% 
+  separate(Guarantors_Name,c('Guarantors_Name1','Guarantors_Name2','Guarantors_Name3','Guarantors_Name4','Guarantors_Name5'),sep = ',') %>% 
+  separate(Tax_Code_For_Guarantors,c('Tax_Code_For_Guarantors1','Tax_Code_For_Guarantors2','Tax_Code_For_Guarantors3','Tax_Code_For_Guarantors4','Tax_Code_For_Guarantors5'),sep = ',')
+Guarantors_groups <-  separated_table_g %>% 
+  pivot_longer(cols = matches('Guarantors|Tax'),
+               names_to = c(".value", "taxID"),
+               names_pattern = "(Guarantors_Name|Tax_Code_For_Guarantors)(.*)",values_drop_na =  TRUE)
+
+Guarantors_groups <- Guarantors_groups %>% select(-taxID)
+Guarantors_groups$Guarantors_Name <- Guarantors_groups$Guarantors_Name %>% str_trim(.,'left')
+Guarantors_groups$Tax_Code_For_Guarantors <- Guarantors_groups$Tax_Code_For_Guarantors %>% str_trim(.,'left')
+
+Guarantors_groups <- Guarantors_groups %>% mutate(Guarantor_ID = paste0('GG', 300 + row_number())) 
+Guarantors_groups <- Guarantors_groups[,c(4,2,3,1)]
+
+
+
+# delete the columns of Guarantors from Loans_ID_Dependent:
+Loans_ID_Dependent <- Loans_ID_Dependent[,-c(9:13)]
+Loans_ID_Dependent$Total_GBV <- round(as.numeric(Loans_ID_Dependent$Total_GBV), 2)
+Loans_ID_Dependent$GBV_Capital <- round(as.numeric(Loans_ID_Dependent$GBV_Capital), 2)
+Loans_ID_Dependent$GBV_Interest <- round(as.numeric(Loans_ID_Dependent$GBV_Interest), 2)
+
+
+# create Asset table:
+Asset_table <- Loans_ID_Dependent[,c(1,3,10)] %>% na.omit(.)
+
+Type_Mortgage_table <- Loans_ID_Dependent %>% select(Type_Of_Mortgage ) %>% na.omit(.) %>% distinct()
+Type_Mortgage_table <- Type_Mortgage_table %>% mutate(Type_ID = paste0('ToM-0',  + row_number())) 
+
+Asset_table <- left_join(Asset_table,Type_Mortgage_table, by = ("Type_Of_Mortgage"="Type_Of_Mortgage") )
+Asset_table <- Asset_table %>% select(-3)
+
+
+Loans_ID_Dependent <- left_join(Loans_ID_Dependent,Type_Mortgage_table, by = ("Type_Of_Mortgage"="Type_Of_Mortgage") )
+Loans_ID_Dependent <- Loans_ID_Dependent[,-c(3,9,10)]
+
+Guarantors_Link <- Guarantors_groups %>% select(1,4)
+Guarantors_groups <- Guarantors_groups[,-4]
+
+Loans_ID_Dependent <- left_join(Loans_ID_Dependent,Guarantors_table %>% 
+                                  select(Loans_ID, Loans_Group_ID),by = c("Loans_ID" = "Loans_ID"))
+
+Guarantors_table <- Guarantors_table[,c(6,3:5)]
 
 
